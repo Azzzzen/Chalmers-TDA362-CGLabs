@@ -44,9 +44,10 @@ GLuint shaderProgram;
 // The vertexArrayObject here will hold the pointers to
 // the vertex data (in positionBuffer) and color data per vertex (in colorBuffer)
 GLuint positionBuffer, colorBuffer, indexBuffer, vertexArrayObject;
-
-
-
+GLuint texBuffer;
+GLuint textureID;
+GLuint vertBuffer2, indexBuffer2, texcoordBuffer2, vertexArrayObject2;
+GLuint texture2;
 
 ///////////////////////////////////////////////////////////////////////////////
 /// This function is called once at the start of the program and never again
@@ -73,6 +74,7 @@ void initialize()
 		10.0f,  0.0f, -330.0f, // v2
 		10.0f,  0.0f, -10.0f   // v3
 	};
+
 	// Create a handle for the vertex position buffer
 	glGenBuffers(1, &positionBuffer);
 	// Set the newly created buffer as the current one
@@ -85,23 +87,79 @@ void initialize()
 	glEnableVertexAttribArray(0);
 
 	///////////////////////////////////////////////////////////////////////////
+	// Create the element array buffer object
+	///////////////////////////////////////////////////////////////////////////
+
+	const int indices[] = {
+	0, 1, 3, // Triangle 1
+	1, 2, 3  // Triangle 2
+	};
+
+	glGenBuffers(1, &indexBuffer);
+	glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, indexBuffer);
+	glBufferData(GL_ELEMENT_ARRAY_BUFFER, labhelper::array_length(indices) * sizeof(float), indices,
+		GL_STATIC_DRAW);
+
+
+	///////////////////////////////////////////////////////////////////////////
 	// Task 1 : Create the texture coordinates.
 	//			Create the texture coordinates' buffer object.
 	//			Set up the attrib pointer.
 	//			Enable the vertex attrib array.
 	///////////////////////////////////////////////////////////////////////////
+	float texcoords[] = {
+		0.0f, 0.0f,    // (u,v) for v0
+		0.0f, 15.0f,   // (u,v) for v1
+		1.0f, 15.0f,   // (u,v) for v2
+		1.0f, 0.0f     // (u,v) for v3
+	};
 
-	///////////////////////////////////////////////////////////////////////////
-	// Create the element array buffer object
-	///////////////////////////////////////////////////////////////////////////
-	const int indices[] = {
+	glGenBuffers(1, &texBuffer);
+	glBindBuffer(GL_ARRAY_BUFFER, texBuffer);
+	glBufferData(GL_ARRAY_BUFFER, labhelper::array_length(texcoords) * sizeof(float), texcoords, GL_STATIC_DRAW);
+	glVertexAttribPointer(1, 2, GL_FLOAT, false, 0, 0);
+	glEnableVertexAttribArray(1);
+
+	const float verts2[] = {
+		2.0f,  0.0f,  -20.0f, // v0
+		2.0f,  10.0f, -20.0f, // v1
+		12.0f, 10.0f, -20.0f, // v2
+		12.0f, 0.0f,  -20.0f  // v3
+	};
+	float texcoords2[] = {
+		0.0f, 0.0f, // (u,v) for v0
+		0.0f, 1.0f, // (u,v) for v1
+		1.0f, 1.0f, // (u,v) for v2
+		1.0f, 0.0f  // (u,v) for v3
+	};
+	const int indices2[] = {
 		0, 1, 3, // Triangle 1
 		1, 2, 3  // Triangle 2
 	};
-	glGenBuffers(1, &indexBuffer);
-	glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, indexBuffer);
-	glBufferData(GL_ELEMENT_ARRAY_BUFFER, labhelper::array_length(indices) * sizeof(float), indices,
-	             GL_STATIC_DRAW);
+	// Create the buffer objects
+	glGenBuffers(1, &vertBuffer2);
+	glBindBuffer(GL_ARRAY_BUFFER, vertBuffer2);
+	glBufferData(GL_ARRAY_BUFFER, labhelper::array_length(verts2) * sizeof(float), verts2, GL_STATIC_DRAW);
+
+	glGenBuffers(1, &texcoordBuffer2);
+	glBindBuffer(GL_ARRAY_BUFFER, texcoordBuffer2);
+	glBufferData(GL_ARRAY_BUFFER, labhelper::array_length(texcoords2) * sizeof(float), texcoords2,
+		GL_STATIC_DRAW);
+
+	glGenBuffers(1, &indexBuffer2);
+	glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, indexBuffer2);
+	glBufferData(GL_ELEMENT_ARRAY_BUFFER, labhelper::array_length(indices2) * sizeof(float), indices2,
+		GL_STATIC_DRAW);
+
+	glGenVertexArrays(1, &vertexArrayObject2);
+	glBindVertexArray(vertexArrayObject2);
+	glBindBuffer(GL_ARRAY_BUFFER, vertBuffer2);
+	glVertexAttribPointer(0, 3, GL_FLOAT, false /*normalized*/, 0 /*stride*/, 0 /*offset*/);
+	glBindBuffer(GL_ARRAY_BUFFER, texcoordBuffer2);
+	glVertexAttribPointer(1, 2, GL_FLOAT, false /*normalized*/, 0 /*stride*/, 0 /*offset*/);
+	glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, indexBuffer2);
+	glEnableVertexAttribArray(0);
+	glEnableVertexAttribArray(1);
 
 
 	// The loadShaderProgram and linkShaderProgam functions are defined in glutil.cpp and
@@ -115,6 +173,32 @@ void initialize()
 	//			Load Texture
 	//************************************
 	// Task 2
+	int w, h, comp;
+	unsigned char* image = stbi_load("../scenes/textures/asphalt.jpg", &w, &h, &comp, STBI_rgb_alpha);
+
+	glGenTextures(1, &textureID);
+	glBindTexture(GL_TEXTURE_2D, textureID);
+	glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, w, h, 0, GL_RGBA, GL_UNSIGNED_BYTE, image);
+	glGenerateMipmap(GL_TEXTURE_2D);
+	stbi_image_free(image);
+
+	glGenTextures(1, &texture2);
+	glBindTexture(GL_TEXTURE_2D, texture2);
+	unsigned char* image2 = stbi_load("../scenes/textures/explosion.png", &w, &h, &comp, STBI_rgb_alpha);
+	glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, w, h, 0, GL_RGBA, GL_UNSIGNED_BYTE, image2);
+	stbi_image_free(image2);
+	//Indicates that the active texture should be repeated,
+	//instead of for instance clamped, for texture coordinates > 1 or <-1.
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
+	glGenerateMipmap(GL_TEXTURE_2D);
+	glTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_MAX_ANISOTROPY_EXT, 16);
+	// Sets the type of mipmap interpolation to be used on magnifying and
+	// minifying the active texture. These are the nicest available options.
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
+	glBindTexture(GL_TEXTURE_2D, 0);
+
 }
 
 
@@ -157,9 +241,18 @@ void display(void)
 	glUniform3f(loc, camera_pan, 10, 0);
 
 	// Task 3.1
+	glActiveTexture(GL_TEXTURE0); //Default
+	glBindTexture(GL_TEXTURE_2D, textureID);
 
 	glBindVertexArray(vertexArrayObject);
 	glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, 0);
+	
+	glEnable(GL_BLEND);
+	glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+	glBindTexture(GL_TEXTURE_2D, texture2);
+	glBindVertexArray(vertexArrayObject2);
+	glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, 0);
+	glEnable(GL_BLEND);
 
 
 	glUseProgram(0); // "unsets" the current shader program. Not really necessary.
@@ -194,7 +287,44 @@ void gui()
 	ImGui::Text("Application average %.3f ms/frame (%.1f FPS)", 1000.0f / ImGui::GetIO().Framerate,
 	            ImGui::GetIO().Framerate);
 	// ----------------------------------------------------------
+	glActiveTexture(GL_TEXTURE0);
+	glBindTexture(GL_TEXTURE_2D, textureID);
+	// Magnification.
+	switch (mag)
+	{
+	case 0:
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+		break;
+	case 1:
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+		break;
+	}
 
+	// Minification.
+	switch (mini)
+	{
+	case 0:
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+		break;
+	case 1:
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+		break;
+	case 2:
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST_MIPMAP_NEAREST);
+		break;
+	case 3:
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST_MIPMAP_LINEAR);
+		break;
+	case 4:
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_NEAREST);
+		break;
+	case 5:
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
+		break;
+	}
+
+	// Anisotropic filtering.
+	glTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_MAX_ANISOTROPY_EXT, anisotropy);
 }
 
 int main(int argc, char* argv[])
