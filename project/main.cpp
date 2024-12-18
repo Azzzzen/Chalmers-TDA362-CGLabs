@@ -1,9 +1,3 @@
-
-
-#ifdef _WIN32
-extern "C" _declspec(dllexport) unsigned int NvOptimusEnablement = 0x00000001;
-#endif
-
 #include <GL/glew.h>
 #include <cmath>
 #include <cstdlib>
@@ -21,6 +15,7 @@ using namespace glm;
 #include <Model.h>
 #include "hdr.h"
 #include "fbo.h"
+#include <random>
 
 
 #define SOLUTION_USE_BUILTIN_SHADOW_TEST 1
@@ -48,7 +43,12 @@ bool g_isMouseDragging = false;
 GLuint shaderProgram;       // Shader for rendering the final image
 GLuint simpleShaderProgram; // Shader used to draw the shadow map
 GLuint backgroundProgram;
-GLuint depthProgram;
+GLuint ssaoInputProgram;
+GLuint ssaoOutputProgram;
+
+FboInfo ssaoIn(1);
+FboInfo ssaoOut(1);
+GLuint noiseTexture;
 
 ///////////////////////////////////////////////////////////////////////////////
 // Environment
@@ -90,6 +90,11 @@ bool useHardwarePCF = false;
 float polygonOffset_factor = 2.0f;
 float polygonOffset_units = 10.0f;
 
+float ourLerp(float a, float b, float f)
+{
+	return a + f * (b - a);
+}
+
 
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -123,30 +128,36 @@ struct camera_t
 
 void loadShaders(bool is_reload)
 {
-	GLuint shader = labhelper::loadShaderProgram("../lab6-shadowmaps/simple.vert", "../lab6-shadowmaps/simple.frag",
+	GLuint shader = labhelper::loadShaderProgram("../project/simple.vert", "../project/simple.frag",
 	                                             is_reload);
 	if(shader != 0)
 	{
 		simpleShaderProgram = shader;
 	}
 
-	shader = labhelper::loadShaderProgram("../lab6-shadowmaps/background.vert", "../lab6-shadowmaps/background.frag",
+	shader = labhelper::loadShaderProgram("../project/fullscreenQuad.vert", "../project/background.frag",
 	                                      is_reload);
 	if(shader != 0)
 	{
 		backgroundProgram = shader;
 	}
 
-	shader = labhelper::loadShaderProgram("../lab6-shadowmaps/shading.vert", "../lab6-shadowmaps/shading.frag", is_reload);
+	shader = labhelper::loadShaderProgram("../project/shading.vert", "../project/shading.frag", is_reload);
 	if(shader != 0)
 	{
 		shaderProgram = shader;
 	}
 
-	shader = labhelper::loadShaderProgram("../lab6-shadowmaps/depth.vert", "../lab6-shadowmaps/depth.frag", is_reload);
-	if (shader != 0)
+	shader = labhelper::loadShaderProgram("../project/ssaoInput.vert", "../project/ssaoInput.frag", is_reload);
+	if(shader != 0)
 	{
-		depthProgram = shader;
+		ssaoInputProgram = shader;
+	}
+
+	shader = labhelper::loadShaderProgram("../project/ssaoOutput.vert", "../project/ssaoOutput.frag", is_reload);
+	if(shader != 0)
+	{
+		ssaoOutputProgram = shader;
 	}
 }
 
@@ -179,7 +190,7 @@ void initialize()
 	///////////////////////////////////////////////////////////////////////
 	const int roughnesses = 8;
 	std::vector<std::string> filenames;
-	for(int i = 0; i < roughnesses; i++)
+	for (int i = 0; i < roughnesses; i++)
 		filenames.push_back("../scenes/envmaps/" + envmap_base_name + "_dl_" + std::to_string(i) + ".hdr");
 
 	environmentMap = labhelper::loadHdrTexture("../scenes/envmaps/" + envmap_base_name + ".hdr");
@@ -202,17 +213,33 @@ void initialize()
 	glEnable(GL_DEPTH_TEST); // enable Z-buffering
 	glEnable(GL_CULL_FACE);  // enables backface culling
 
+	//SSAO
+	std::uniform_real_distribution<GLfloat> randomFloats(0.0, 1.0); // generates random floats between 0.0 and 1.0
+	std::default_random_engine generator;
+	std::vector<glm::vec3> ssaoKernel;
+	for (unsigned int i = 0; i < 64; ++i)
+	{
+		glm::vec3 sample(randomFloats(generator) * 2.0 - 1.0, randomFloats(generator) * 2.0 - 1.0, randomFloats(generator));
+		sample = glm::normalize(sample);
+		sample *= randomFloats(generator);
+		float scale = float(i) / 64.0f;
+
+		// scale samples s.t. they're more aligned to center of kernel
+		scale = ourLerp(0.1f, 1.0f, scale * scale);
+		sample *= scale;
+		ssaoKernel.push_back(sample);
+	}
 
 }
 
 void debugDrawLight(const glm::mat4& viewMatrix,
-                    const glm::mat4& projectionMatrix,
-                    const glm::vec3& worldSpaceLightPos)
+	const glm::mat4& projectionMatrix,
+	const glm::vec3& worldSpaceLightPos)
 {
 	mat4 modelMatrix = glm::translate(worldSpaceLightPos);
 	glUseProgram(simpleShaderProgram);
 	labhelper::setUniformSlow(simpleShaderProgram, "modelViewProjectionMatrix",
-	                          projectionMatrix * viewMatrix * modelMatrix);
+		projectionMatrix * viewMatrix * modelMatrix);
 	labhelper::setUniformSlow(simpleShaderProgram, "material_color", vec3(1, 1, 1));
 	labhelper::debugDrawSphere();
 }
@@ -232,20 +259,20 @@ void drawBackground(const mat4& viewMatrix, const mat4& projectionMatrix)
 /// This function is used to draw the main objects on the scene
 ///////////////////////////////////////////////////////////////////////////////
 void drawScene(GLuint currentShaderProgram,
-               const mat4& viewMatrix,
-               const mat4& projectionMatrix,
-               const mat4& lightViewMatrix,
-               const mat4& lightProjectionMatrix)
+	const mat4& viewMatrix,
+	const mat4& projectionMatrix,
+	const mat4& lightViewMatrix,
+	const mat4& lightProjectionMatrix)
 {
 	glUseProgram(currentShaderProgram);
 	// Light source
 	vec4 viewSpaceLightPosition = viewMatrix * vec4(lightPosition, 1.0f);
 	labhelper::setUniformSlow(currentShaderProgram, "point_light_color", point_light_color);
 	labhelper::setUniformSlow(currentShaderProgram, "point_light_intensity_multiplier",
-	                          point_light_intensity_multiplier);
+		point_light_intensity_multiplier);
 	labhelper::setUniformSlow(currentShaderProgram, "viewSpaceLightPosition", vec3(viewSpaceLightPosition));
 	labhelper::setUniformSlow(currentShaderProgram, "viewSpaceLightDir",
-	                          normalize(vec3(viewMatrix * vec4(-lightPosition, 0.0f))));
+		normalize(vec3(viewMatrix * vec4(-lightPosition, 0.0f))));
 	labhelper::setUniformSlow(currentShaderProgram, "spotOuterAngle", std::cos(radians(outerSpotlightAngle)));
 	labhelper::setUniformSlow(currentShaderProgram, "useSpotLight", useSpotLight ? 1 : 0);
 	labhelper::setUniformSlow(currentShaderProgram, "useSoftFalloff", useSoftFalloff ? 1 : 0);
@@ -267,21 +294,24 @@ void drawScene(GLuint currentShaderProgram,
 
 	// landing pad
 	labhelper::setUniformSlow(currentShaderProgram, "modelViewProjectionMatrix",
-	                          projectionMatrix * viewMatrix * landingPadModelMatrix);
+		projectionMatrix * viewMatrix * landingPadModelMatrix);
 	labhelper::setUniformSlow(currentShaderProgram, "modelViewMatrix", viewMatrix * landingPadModelMatrix);
 	labhelper::setUniformSlow(currentShaderProgram, "normalMatrix",
-	                          inverse(transpose(viewMatrix * landingPadModelMatrix)));
+		inverse(transpose(viewMatrix * landingPadModelMatrix)));
 
 	labhelper::render(landingpadModel);
 
 	// Fighter
 	labhelper::setUniformSlow(currentShaderProgram, "modelViewProjectionMatrix",
-	                          projectionMatrix * viewMatrix * fighterModelMatrix);
+		projectionMatrix * viewMatrix * fighterModelMatrix);
 	labhelper::setUniformSlow(currentShaderProgram, "modelViewMatrix", viewMatrix * fighterModelMatrix);
 	labhelper::setUniformSlow(currentShaderProgram, "normalMatrix",
-	                          inverse(transpose(viewMatrix * fighterModelMatrix)));
+		inverse(transpose(viewMatrix * fighterModelMatrix)));
 
 	labhelper::render(fighterModel);
+
+
+
 }
 
 
@@ -296,7 +326,7 @@ void display(void)
 	///////////////////////////////////////////////////////////////////////////
 	int w, h;
 	SDL_GetWindowSize(g_window, &w, &h);
-	if(w != windowWidth || h != windowHeight)
+	if (w != windowWidth || h != windowHeight)
 	{
 		windowWidth = w;
 		windowHeight = h;
@@ -314,6 +344,39 @@ void display(void)
 	mat4 lightViewMatrix = lookAt(lightPosition, vec3(0.0f), worldUp);
 	mat4 lightProjMatrix = perspective(radians(45.0f), 1.0f, 25.0f, 100.0f);
 
+	//SSAO
+	if (ssaoIn.width != windowWidth || ssaoIn.height != windowHeight) {
+		ssaoIn.resize(windowWidth, windowHeight);
+	}
+	glBindFramebuffer(GL_FRAMEBUFFER, ssaoIn.framebufferId);
+	glViewport(0, 0, windowWidth, windowHeight);
+	glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
+	glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+	drawScene(ssaoInputProgram, viewMatrix, projMatrix, lightViewMatrix, lightProjMatrix);
+
+	// Compute SSAO
+	if (ssaoOut.width != windowWidth || ssaoOut.height != windowHeight) {
+		ssaoOut.resize(windowWidth, windowHeight);
+	}
+
+	// Init Frame Buffer
+	glBindFramebuffer(GL_FRAMEBUFFER, ssaoOut.framebufferId);
+	glViewport(0, 0, windowWidth, windowHeight);
+	glClearColor(0.2, 0.2, 0.8, 1.0);
+	glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+
+	// Shader
+	glUseProgram(ssaoOutputProgram);
+	labhelper::setUniformSlow(ssaoOutputProgram, "projectionMatrix", projMatrix);
+
+	// Textures
+	glActiveTexture(GL_TEXTURE3); // Normal map
+	glBindTexture(GL_TEXTURE_2D, ssaoIn.colorTextureTargets[0]); // Will these go out-of-bounds? no, since it's windowSize
+	glActiveTexture(GL_TEXTURE4); // Depth Buffer
+	glBindTexture(GL_TEXTURE_2D, ssaoIn.depthBuffer);
+
+	labhelper::drawFullScreenQuad(); // Post-process
+
 	///////////////////////////////////////////////////////////////////////////
 	// Bind the environment map(s) to unused texture units
 	///////////////////////////////////////////////////////////////////////////
@@ -323,6 +386,8 @@ void display(void)
 	glBindTexture(GL_TEXTURE_2D, irradianceMap);
 	glActiveTexture(GL_TEXTURE8);
 	glBindTexture(GL_TEXTURE_2D, reflectionMap);
+	glActiveTexture(GL_TEXTURE9);
+	glBindTexture(GL_TEXTURE_2D, ssaoOut.colorTextureTargets[0]);
 	glActiveTexture(GL_TEXTURE0);
 
 
@@ -336,58 +401,28 @@ void display(void)
 	}
 
 	glBindTexture(GL_TEXTURE_2D, shadowMapFB.depthBuffer);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
 
-	if (shadowMapClampMode == ClampMode::Edge)
-	{
-		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-	}
-	else if (shadowMapClampMode == ClampMode::Border)
-	{
-		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_BORDER);
-		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_BORDER);
-		vec4 border(shadowMapClampBorderShadowed ? 0.f : 1.f);
-		glTexParameterfv(GL_TEXTURE_2D, GL_TEXTURE_BORDER_COLOR, &border.x);
-	}
 
-	if (SOLUTION_USE_BUILTIN_SHADOW_TEST && useHardwarePCF)
-	{
-		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-	}
-	else
-	{
-		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
-		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
-	}
-	///////////////////////////////////////////////////////////////////////////
-	// Draw Shadow Map
-	///////////////////////////////////////////////////////////////////////////
 	glBindFramebuffer(GL_FRAMEBUFFER, shadowMapFB.framebufferId);
 	glViewport(0, 0, shadowMapFB.width, shadowMapFB.height);
-	glClearColor(1.0, 1.0, 1.0, 1.0);
-	glClearDepth(1.0);
-	glClear(GL_DEPTH_BUFFER_BIT | GL_COLOR_BUFFER_BIT);
+	glClearColor(1.0f, 1.0f, 1.0f, 1.0f);
+	glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+	glActiveTexture(GL_TEXTURE10);
+	glBindTexture(GL_TEXTURE_2D, shadowMapFB.depthBuffer);
+	glEnable(GL_POLYGON_OFFSET_FILL);
+	glPolygonOffset(polygonOffset_factor, polygonOffset_units);
 
-	if (usePolygonOffset)
-	{
-		glEnable(GL_POLYGON_OFFSET_FILL);
-		glPolygonOffset(polygonOffset_factor, polygonOffset_units);
-	}
+	drawScene(simpleShaderProgram, lightViewMatrix, lightProjMatrix, lightViewMatrix, lightProjMatrix);
 
-	drawScene(depthProgram, lightViewMatrix, lightProjMatrix, lightViewMatrix, lightProjMatrix);
-
-	if (usePolygonOffset)
-	{
-		glDisable(GL_POLYGON_OFFSET_FILL);
-	}
-
+	glDisable(GL_POLYGON_OFFSET_FILL);
 
 	///////////////////////////////////////////////////////////////////////////
-	// Draw from camera
+	// Draw from camera to a buffer
 	///////////////////////////////////////////////////////////////////////////
-	glBindFramebuffer(GL_FRAMEBUFFER, 0);
-	glViewport(0, 0, w, h);
+	glBindFramebuffer(GL_FRAMEBUFFER, ssaoOut.framebufferId);
+	glViewport(0, 0, windowWidth, windowHeight);
 	glClearColor(0.2f, 0.2f, 0.8f, 1.0f);
 	glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
@@ -395,8 +430,23 @@ void display(void)
 	drawScene(shaderProgram, viewMatrix, projMatrix, lightViewMatrix, lightProjMatrix);
 	debugDrawLight(viewMatrix, projMatrix, vec3(lightPosition));
 
+	///////////////////////////////////////////////////////////////////////////
+	// Post processing pass(es)
+	///////////////////////////////////////////////////////////////////////////
+	glBindFramebuffer(GL_FRAMEBUFFER, 0);
+	glViewport(0, 0, windowWidth, windowHeight);
+	glClearColor(0.2f, 0.2f, 0.8f, 1.0f);
+	glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+	glUseProgram(ssaoOutputProgram);
+	glActiveTexture(GL_TEXTURE3);
+	glBindTexture(GL_TEXTURE_2D, ssaoIn.colorTextureTargets[0]);
+	glActiveTexture(GL_TEXTURE4);
+	glBindTexture(GL_TEXTURE_2D, ssaoIn.depthBuffer);
 
-	CHECK_GL_ERROR();
+	labhelper::setUniformSlow(ssaoOutputProgram, "ProjectionMatrix", projMatrix);
+
+
+	labhelper::drawFullScreenQuad();
 }
 
 ///////////////////////////////////////////////////////////////////////////////

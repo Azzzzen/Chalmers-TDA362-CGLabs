@@ -23,6 +23,7 @@ layout(binding = 5) uniform sampler2D emissiveMap;
 layout(binding = 6) uniform sampler2D environmentMap;
 layout(binding = 7) uniform sampler2D irradianceMap;
 layout(binding = 8) uniform sampler2D reflectionMap;
+layout(binding = 0) uniform sampler2D ssao;
 uniform float environment_multiplier;
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -63,6 +64,7 @@ uniform int useSoftFalloff;
 uniform vec3 viewSpaceLightDir;
 uniform float spotInnerAngle;
 uniform float spotOuterAngle;
+
 
 vec3 calculateDirectIllumiunation(vec3 wo, vec3 n, vec3 base_color)
 {
@@ -126,6 +128,10 @@ vec3 calculateIndirectIllumination(vec3 wo, vec3 n, vec3 base_color)
 	vec2 lookup = vec2(phi / (2.0 * PI), 1 - theta / PI);
 	vec3 Li = environment_multiplier * texture(irradianceMap, lookup).rgb;
 	vec3 diffuse_term = base_color * (1.0 / PI) * Li;
+
+	///////////////////////////////////////////////////////////////////////////
+	diffuse_term *= texture(ssao, gl_FragCoord.xy/textureSize(ssao, 0)).x;
+
 	indirect_illum = diffuse_term;
 	///////////////////////////////////////////////////////////////////////////
 	// Task 6 - Look up in the reflection map from the perfect specular
@@ -207,6 +213,6 @@ void main()
 
 	vec3 shading = direct_illumination_term + indirect_illumination_term + emission_term;
 
-	fragmentColor = vec4(shading, 1.0);
+    fragmentColor = vec4(shading, 1.0);
 	return;
 }
