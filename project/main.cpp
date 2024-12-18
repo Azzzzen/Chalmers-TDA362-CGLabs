@@ -50,6 +50,7 @@ FboInfo ssaoIn(1);
 FboInfo ssaoOut(1);
 GLuint noiseTexture;
 bool useSSAO = true;
+int outputMode = 0;
 
 std::uniform_real_distribution<GLfloat> randomFloats(0.0, 1.0); // generates random floats between 0.0 and 1.0
 std::default_random_engine generator;
@@ -228,7 +229,6 @@ void initialize()
 		sample *= randomFloats(generator);
 		float scale = float(i) / 64.0f;
 
-		// scale samples s.t. they're more aligned to center of kernel
 		scale = ourLerp(0.1f, 1.0f, scale * scale);
 		sample *= scale;
 		ssaoKernel.push_back(sample);
@@ -367,23 +367,23 @@ void display(void)
 	///////////////////////////////////////////////////////////////////////////
 	// SSAO buffer
 	///////////////////////////////////////////////////////////////////////////
-		if (ssaoIn.width != windowWidth || ssaoIn.height != windowHeight) {
-			ssaoIn.resize(windowWidth, windowHeight);
-		}
-		glBindFramebuffer(GL_FRAMEBUFFER, ssaoIn.framebufferId);
-		glViewport(0, 0, windowWidth, windowHeight);
-		glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
-		glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
-		drawScene(ssaoInputProgram, viewMatrix, projMatrix, lightViewMatrix, lightProjMatrix);
+	if (ssaoIn.width != windowWidth || ssaoIn.height != windowHeight) {
+		ssaoIn.resize(windowWidth, windowHeight);
+	}
+	glBindFramebuffer(GL_FRAMEBUFFER, ssaoIn.framebufferId);
+	glViewport(0, 0, windowWidth, windowHeight);
+	glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
+	glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+	drawScene(ssaoInputProgram, viewMatrix, projMatrix, lightViewMatrix, lightProjMatrix);
 
-		if (ssaoOut.width != windowWidth || ssaoOut.height != windowHeight) {
-			ssaoOut.resize(windowWidth, windowHeight);
-		}
+	if (ssaoOut.width != windowWidth || ssaoOut.height != windowHeight) {
+		ssaoOut.resize(windowWidth, windowHeight);
+	}
 
-		///////////////////////////////////////////////////////////////////////////
-		// Compute SSAO
-		///////////////////////////////////////////////////////////////////////////
-		if (useSSAO) {
+	///////////////////////////////////////////////////////////////////////////
+	// Compute SSAO
+	///////////////////////////////////////////////////////////////////////////
+	if (useSSAO) {
 		glBindFramebuffer(GL_FRAMEBUFFER, ssaoOut.framebufferId);
 		glViewport(0, 0, windowWidth, windowHeight);
 		glClearColor(0.2f, 0.2f, 0.8f, 1.0f);
@@ -393,6 +393,7 @@ void display(void)
 		labhelper::setUniformSlow(ssaoOutputProgram, "projectionMatrix", projMatrix);
 		glUniform3fv(glGetUniformLocation(ssaoOutputProgram, "samples"), 64, &ssaoKernel[0].x);
 		glUniform1i(glGetUniformLocation(ssaoOutputProgram, "noiseTexture"), 11);
+		glUniform1i(glGetUniformLocation(ssaoOutputProgram, "outputMode"), outputMode);
 
 		glActiveTexture(GL_TEXTURE3);
 		glBindTexture(GL_TEXTURE_2D, ssaoIn.colorTextureTargets[0]);
@@ -400,7 +401,7 @@ void display(void)
 		glBindTexture(GL_TEXTURE_2D, ssaoIn.depthBuffer);
 
 		labhelper::drawFullScreenQuad();
-		}
+	}
 
 	///////////////////////////////////////////////////////////////////////////
 	// Bind the environment map(s) to unused texture units
@@ -413,14 +414,14 @@ void display(void)
 	glBindTexture(GL_TEXTURE_2D, reflectionMap);
 
 	glUseProgram(shaderProgram);
-	glUniform1i(glGetUniformLocation(shaderProgram, "useSSAO"), useSSAO ? 1 : 0); 
+	glUniform1i(glGetUniformLocation(shaderProgram, "useSSAO"), useSSAO ? 1 : 0);
 	if (useSSAO) {
 		glActiveTexture(GL_TEXTURE9);
-		glBindTexture(GL_TEXTURE_2D, ssaoOut.colorTextureTargets[0]); 
+		glBindTexture(GL_TEXTURE_2D, ssaoOut.colorTextureTargets[0]);
 	}
 	else {
 		glActiveTexture(GL_TEXTURE9);
-		glBindTexture(GL_TEXTURE_2D, 0); 
+		glBindTexture(GL_TEXTURE_2D, 0);
 	}
 
 	glActiveTexture(GL_TEXTURE0);
@@ -463,10 +464,9 @@ void display(void)
 	drawScene(shaderProgram, viewMatrix, projMatrix, lightViewMatrix, lightProjMatrix);
 	debugDrawLight(viewMatrix, projMatrix, vec3(lightPosition));
 
-	
+	///////////////////////////////////////////////////////////////////////////
 	glUseProgram(ssaoOutputProgram);
-	labhelper::drawFullScreenQuad(); 
-
+	labhelper::drawFullScreenQuad();
 
 }
 
@@ -579,29 +579,19 @@ bool handleEvents(void)
 void gui()
 {
 	// ----------------- Set variables --------------------------
-	ImGui::SliderInt("Shadow Map Resolution", &shadowMapResolution, 32, 2048);
-	ImGui::Text("Polygon Offset");
+
 	ImGui::Checkbox("Use polygon offset", &usePolygonOffset);
-	ImGui::SliderFloat("Factor", &polygonOffset_factor, 0.0f, 10.0f);
-	ImGui::SliderFloat("Units", &polygonOffset_units, 0.0f, 100000.0f);
-	ImGui::Text("Clamp Mode");
-	ImGui::RadioButton("Clamp to edge", &shadowMapClampMode, ClampMode::Edge);
-	ImGui::RadioButton("Clamp to border", &shadowMapClampMode, ClampMode::Border);
-	ImGui::Checkbox("Border as shadow", &shadowMapClampBorderShadowed);
+
 	ImGui::Checkbox("Use spot light", &useSpotLight);
 	ImGui::Checkbox("Use soft falloff", &useSoftFalloff);
-	ImGui::SliderFloat("Inner Deg.", &innerSpotlightAngle, 0.0f, 90.0f);
-	ImGui::SliderFloat("Outer Deg.", &outerSpotlightAngle, 0.0f, 90.0f);
+	
 	ImGui::Checkbox("Use hardware PCF", &useHardwarePCF);
 	ImGui::Checkbox("Animate light", &animateLight);
-	ImGui::SliderFloat("Light Azimuth", &lightAzimuth, 0.0f, 360.0f);
-	ImGui::SliderFloat("Light Zenith", &lightZenith, 0.0f, 90.0f);
-	ImGui::Text("Application average %.3f ms/frame (%.1f FPS)", 1000.0f / ImGui::GetIO().Framerate,
-		ImGui::GetIO().Framerate);
 	if (ImGui::Button("Reload Shaders")) {
-		loadShaders(true); 
+		loadShaders(true);
 	}
 	ImGui::Checkbox("Use SSAO", &useSSAO);
+	ImGui::Combo("Output Mode", &outputMode, "SSAO\0Depth\0Normal\0Valid_Samples\0");
 }
 
 int main(int argc, char* argv[])

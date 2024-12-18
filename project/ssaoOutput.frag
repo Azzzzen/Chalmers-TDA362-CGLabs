@@ -1,15 +1,5 @@
 #version 420
 
-// required by GLSL spec Sect 4.5.3 (though nvidia does not, amd does)
-precision highp float;
-
-#define MAX_SSAO 300
-#define PI 3.1415926538
-
-///////////////////////////////////////////////////////////////////////////////
-// Textures
-///////////////////////////////////////////////////////////////////////////////
-// Don't use unit 0, used by shading.frag (colorMap)
 layout(binding = 3) uniform sampler2D normalTex;
 layout(binding = 4) uniform sampler2D depthTex;
 
@@ -17,14 +7,14 @@ uniform mat4 projectionMatrix;
 
 layout(location = 0) out vec4 fragColor;
 
+uniform int outputMode;
 uniform vec3 samples[64];
 uniform sampler2D noiseTexture;
 
 int kernelSize = 64;
-float radius = 0.1;
-float bias = 0.025;
+float radius = 0.02;
+float bias = 0.05;
 
-vec3 samplePos; float rangeCheck;
 
 vec3 homogenize(vec4 v) { return vec3((1.0 / v.w) * v); }
 
@@ -58,8 +48,8 @@ void main() {
 	vec3 vs_bitangent = cross(vs_normal, vs_tangent);
 	mat3 tbn = mat3(vs_tangent, vs_bitangent, vs_normal); // local base
 
-	vec2 noiseCoord = gl_FragCoord.xy / vec2(textureSize(noiseTexture, 0)); // 计算噪声坐标
-    vec3 noiseValue = texture(noiseTexture, noiseCoord).xyz; // 从噪声纹理中采样
+	vec2 noiseCoord = gl_FragCoord.xy / vec2(textureSize(noiseTexture, 0)); 
+    vec3 noiseValue = texture(noiseTexture, noiseCoord).xyz;
 
 	int num_visible_samples = 0; 
 	int num_valid_samples = 0; 
@@ -93,18 +83,26 @@ void main() {
 		num_valid_samples += 1;
 	}
 
-	float hemisphericalVisibility = float(num_visible_samples) / float(num_valid_samples);
+	float hemisphericalVisibility = 1.0;
 
-	if (num_valid_samples == 0)
-		hemisphericalVisibility = 1.0;
+	if (num_valid_samples > 0)
+	{
+		hemisphericalVisibility = float(num_visible_samples) / float(num_valid_samples);
+	}
 
-	fragColor = vec4(vec3(hemisphericalVisibility), 1.0);
-	//fragColor = vec4(fragmentDepth); // debug depth
-	//fragColor = vec4(vs_normal, 1.0); // debug normals
+	if(outputMode == 0)
+	{
+		fragColor = vec4(vec3(hemisphericalVisibility), 1.0);
+		return;
+	}else if (outputMode == 1){
+	    fragColor = vec4(fragmentDepth);
+		return;
+	}else if (outputMode == 2){
+		fragColor = vec4(vs_normal, 1.0);
+		return;
+	}else if (outputMode == 3){
+		fragColor = vec4(vec3(float(num_valid_samples) / float(kernelSize)), 1.0); 
+		return;
+	}
 
-	// fragColor = vec4(vec3(float(num_valid_samples) / float(kernelSize)), 1.0); // 检查有效样本比例
-	// fragColor = vec4(vec3(float(num_visible_samples) / float(kernelSize)), 1.0); // 检查可见样本比例
-
-
-	return;
 }
