@@ -23,7 +23,7 @@ layout(binding = 5) uniform sampler2D emissiveMap;
 layout(binding = 6) uniform sampler2D environmentMap;
 layout(binding = 7) uniform sampler2D irradianceMap;
 layout(binding = 8) uniform sampler2D reflectionMap;
-layout(binding = 0) uniform sampler2D ssao;
+layout(binding = 9) uniform sampler2D ssao;
 uniform float environment_multiplier;
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -64,6 +64,8 @@ uniform int useSoftFalloff;
 uniform vec3 viewSpaceLightDir;
 uniform float spotInnerAngle;
 uniform float spotOuterAngle;
+
+uniform int useSSAO;
 
 
 vec3 calculateDirectIllumiunation(vec3 wo, vec3 n, vec3 base_color)
@@ -130,7 +132,6 @@ vec3 calculateIndirectIllumination(vec3 wo, vec3 n, vec3 base_color)
 	vec3 diffuse_term = base_color * (1.0 / PI) * Li;
 
 	///////////////////////////////////////////////////////////////////////////
-	diffuse_term *= texture(ssao, gl_FragCoord.xy/textureSize(ssao, 0)).x;
 
 	indirect_illum = diffuse_term;
 	///////////////////////////////////////////////////////////////////////////
@@ -200,7 +201,9 @@ void main()
 	vec3 direct_illumination_term = visibility * calculateDirectIllumiunation(wo, n, base_color);
 
 	// Indirect illumination
-	vec3 indirect_illumination_term = calculateIndirectIllumination(wo, n, base_color);
+	float occlusion = useSSAO == 1 ? texture(ssao, gl_FragCoord.xy / textureSize(ssao, 0)).r : 1.0;
+	
+    vec3 indirect_illumination_term = occlusion * calculateIndirectIllumination(wo, n, base_color);
 
 	///////////////////////////////////////////////////////////////////////////
 	// Add emissive term. If emissive texture exists, sample this term.

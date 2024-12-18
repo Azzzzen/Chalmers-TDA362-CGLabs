@@ -1,9 +1,12 @@
 #version 420
 
-in vec3 vsNormal;
 
-layout(location = 0) out vec4 fragColor;
+in vec3 viewSpaceNormal;
 
-void main(){
-	fragColor = vec4(normalize(vsNormal*0.5+0.5), 1.0);
+layout(location = 0) out vec4 fragmentColor;
+
+void main() {
+	vec3 n = normalize(viewSpaceNormal)*0.5 + 0.5;
+	fragmentColor = vec4(n, 1.0); 
+	return;
 }

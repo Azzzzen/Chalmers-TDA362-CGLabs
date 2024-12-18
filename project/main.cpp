@@ -49,6 +49,12 @@ GLuint ssaoOutputProgram;
 FboInfo ssaoIn(1);
 FboInfo ssaoOut(1);
 GLuint noiseTexture;
+bool useSSAO = true;
+
+std::uniform_real_distribution<GLfloat> randomFloats(0.0, 1.0); // generates random floats between 0.0 and 1.0
+std::default_random_engine generator;
+std::vector<glm::vec3> ssaoKernel;
+std::vector<glm::vec3> ssaoNoise;
 
 ///////////////////////////////////////////////////////////////////////////////
 // Environment
@@ -129,33 +135,33 @@ struct camera_t
 void loadShaders(bool is_reload)
 {
 	GLuint shader = labhelper::loadShaderProgram("../project/simple.vert", "../project/simple.frag",
-	                                             is_reload);
-	if(shader != 0)
+		is_reload);
+	if (shader != 0)
 	{
 		simpleShaderProgram = shader;
 	}
 
-	shader = labhelper::loadShaderProgram("../project/fullscreenQuad.vert", "../project/background.frag",
-	                                      is_reload);
-	if(shader != 0)
+	shader = labhelper::loadShaderProgram("../project/background.vert", "../project/background.frag",
+		is_reload);
+	if (shader != 0)
 	{
 		backgroundProgram = shader;
 	}
 
 	shader = labhelper::loadShaderProgram("../project/shading.vert", "../project/shading.frag", is_reload);
-	if(shader != 0)
+	if (shader != 0)
 	{
 		shaderProgram = shader;
 	}
 
 	shader = labhelper::loadShaderProgram("../project/ssaoInput.vert", "../project/ssaoInput.frag", is_reload);
-	if(shader != 0)
+	if (shader != 0)
 	{
 		ssaoInputProgram = shader;
 	}
 
 	shader = labhelper::loadShaderProgram("../project/ssaoOutput.vert", "../project/ssaoOutput.frag", is_reload);
-	if(shader != 0)
+	if (shader != 0)
 	{
 		ssaoOutputProgram = shader;
 	}
@@ -213,10 +219,8 @@ void initialize()
 	glEnable(GL_DEPTH_TEST); // enable Z-buffering
 	glEnable(GL_CULL_FACE);  // enables backface culling
 
-	//SSAO
-	std::uniform_real_distribution<GLfloat> randomFloats(0.0, 1.0); // generates random floats between 0.0 and 1.0
-	std::default_random_engine generator;
-	std::vector<glm::vec3> ssaoKernel;
+	//SSAO Sample
+
 	for (unsigned int i = 0; i < 64; ++i)
 	{
 		glm::vec3 sample(randomFloats(generator) * 2.0 - 1.0, randomFloats(generator) * 2.0 - 1.0, randomFloats(generator));
@@ -229,6 +233,22 @@ void initialize()
 		sample *= scale;
 		ssaoKernel.push_back(sample);
 	}
+
+	//Noise
+
+	for (unsigned int i = 0; i < 16; i++)
+	{
+		glm::vec3 noise(randomFloats(generator) * 2.0 - 1.0, randomFloats(generator) * 2.0 - 1.0, 0.0f); // rotate around z-axis (in tangent space)
+		ssaoNoise.push_back(noise);
+	}
+	glGenTextures(1, &noiseTexture);
+	glActiveTexture(GL_TEXTURE11);
+	glBindTexture(GL_TEXTURE_2D, noiseTexture);
+	glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA32F, 4, 4, 0, GL_RGB, GL_FLOAT, &ssaoNoise[0]);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
 
 }
 
@@ -344,38 +364,43 @@ void display(void)
 	mat4 lightViewMatrix = lookAt(lightPosition, vec3(0.0f), worldUp);
 	mat4 lightProjMatrix = perspective(radians(45.0f), 1.0f, 25.0f, 100.0f);
 
-	//SSAO
-	if (ssaoIn.width != windowWidth || ssaoIn.height != windowHeight) {
-		ssaoIn.resize(windowWidth, windowHeight);
-	}
-	glBindFramebuffer(GL_FRAMEBUFFER, ssaoIn.framebufferId);
-	glViewport(0, 0, windowWidth, windowHeight);
-	glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
-	glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
-	drawScene(ssaoInputProgram, viewMatrix, projMatrix, lightViewMatrix, lightProjMatrix);
+	///////////////////////////////////////////////////////////////////////////
+	// SSAO buffer
+	///////////////////////////////////////////////////////////////////////////
+		if (ssaoIn.width != windowWidth || ssaoIn.height != windowHeight) {
+			ssaoIn.resize(windowWidth, windowHeight);
+		}
+		glBindFramebuffer(GL_FRAMEBUFFER, ssaoIn.framebufferId);
+		glViewport(0, 0, windowWidth, windowHeight);
+		glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
+		glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+		drawScene(ssaoInputProgram, viewMatrix, projMatrix, lightViewMatrix, lightProjMatrix);
 
-	// Compute SSAO
-	if (ssaoOut.width != windowWidth || ssaoOut.height != windowHeight) {
-		ssaoOut.resize(windowWidth, windowHeight);
-	}
+		if (ssaoOut.width != windowWidth || ssaoOut.height != windowHeight) {
+			ssaoOut.resize(windowWidth, windowHeight);
+		}
 
-	// Init Frame Buffer
-	glBindFramebuffer(GL_FRAMEBUFFER, ssaoOut.framebufferId);
-	glViewport(0, 0, windowWidth, windowHeight);
-	glClearColor(0.2, 0.2, 0.8, 1.0);
-	glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+		///////////////////////////////////////////////////////////////////////////
+		// Compute SSAO
+		///////////////////////////////////////////////////////////////////////////
+		if (useSSAO) {
+		glBindFramebuffer(GL_FRAMEBUFFER, ssaoOut.framebufferId);
+		glViewport(0, 0, windowWidth, windowHeight);
+		glClearColor(0.2f, 0.2f, 0.8f, 1.0f);
+		glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
-	// Shader
-	glUseProgram(ssaoOutputProgram);
-	labhelper::setUniformSlow(ssaoOutputProgram, "projectionMatrix", projMatrix);
+		glUseProgram(ssaoOutputProgram);
+		labhelper::setUniformSlow(ssaoOutputProgram, "projectionMatrix", projMatrix);
+		glUniform3fv(glGetUniformLocation(ssaoOutputProgram, "samples"), 64, &ssaoKernel[0].x);
+		glUniform1i(glGetUniformLocation(ssaoOutputProgram, "noiseTexture"), 11);
 
-	// Textures
-	glActiveTexture(GL_TEXTURE3); // Normal map
-	glBindTexture(GL_TEXTURE_2D, ssaoIn.colorTextureTargets[0]); // Will these go out-of-bounds? no, since it's windowSize
-	glActiveTexture(GL_TEXTURE4); // Depth Buffer
-	glBindTexture(GL_TEXTURE_2D, ssaoIn.depthBuffer);
+		glActiveTexture(GL_TEXTURE3);
+		glBindTexture(GL_TEXTURE_2D, ssaoIn.colorTextureTargets[0]);
+		glActiveTexture(GL_TEXTURE4);
+		glBindTexture(GL_TEXTURE_2D, ssaoIn.depthBuffer);
 
-	labhelper::drawFullScreenQuad(); // Post-process
+		labhelper::drawFullScreenQuad();
+		}
 
 	///////////////////////////////////////////////////////////////////////////
 	// Bind the environment map(s) to unused texture units
@@ -386,11 +411,19 @@ void display(void)
 	glBindTexture(GL_TEXTURE_2D, irradianceMap);
 	glActiveTexture(GL_TEXTURE8);
 	glBindTexture(GL_TEXTURE_2D, reflectionMap);
-	glActiveTexture(GL_TEXTURE9);
-	glBindTexture(GL_TEXTURE_2D, ssaoOut.colorTextureTargets[0]);
+
+	glUseProgram(shaderProgram);
+	glUniform1i(glGetUniformLocation(shaderProgram, "useSSAO"), useSSAO ? 1 : 0); 
+	if (useSSAO) {
+		glActiveTexture(GL_TEXTURE9);
+		glBindTexture(GL_TEXTURE_2D, ssaoOut.colorTextureTargets[0]); 
+	}
+	else {
+		glActiveTexture(GL_TEXTURE9);
+		glBindTexture(GL_TEXTURE_2D, 0); 
+	}
+
 	glActiveTexture(GL_TEXTURE0);
-
-
 
 	///////////////////////////////////////////////////////////////////////////
 	// Draw from camera
@@ -419,9 +452,9 @@ void display(void)
 	glDisable(GL_POLYGON_OFFSET_FILL);
 
 	///////////////////////////////////////////////////////////////////////////
-	// Draw from camera to a buffer
+	// Final render	
 	///////////////////////////////////////////////////////////////////////////
-	glBindFramebuffer(GL_FRAMEBUFFER, ssaoOut.framebufferId);
+	glBindFramebuffer(GL_FRAMEBUFFER, 0);
 	glViewport(0, 0, windowWidth, windowHeight);
 	glClearColor(0.2f, 0.2f, 0.8f, 1.0f);
 	glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
@@ -430,23 +463,11 @@ void display(void)
 	drawScene(shaderProgram, viewMatrix, projMatrix, lightViewMatrix, lightProjMatrix);
 	debugDrawLight(viewMatrix, projMatrix, vec3(lightPosition));
 
-	///////////////////////////////////////////////////////////////////////////
-	// Post processing pass(es)
-	///////////////////////////////////////////////////////////////////////////
-	glBindFramebuffer(GL_FRAMEBUFFER, 0);
-	glViewport(0, 0, windowWidth, windowHeight);
-	glClearColor(0.2f, 0.2f, 0.8f, 1.0f);
-	glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+	
 	glUseProgram(ssaoOutputProgram);
-	glActiveTexture(GL_TEXTURE3);
-	glBindTexture(GL_TEXTURE_2D, ssaoIn.colorTextureTargets[0]);
-	glActiveTexture(GL_TEXTURE4);
-	glBindTexture(GL_TEXTURE_2D, ssaoIn.depthBuffer);
-
-	labhelper::setUniformSlow(ssaoOutputProgram, "ProjectionMatrix", projMatrix);
+	labhelper::drawFullScreenQuad(); 
 
 
-	labhelper::drawFullScreenQuad();
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -460,24 +481,24 @@ bool handleEvents(void)
 	// check events (keyboard among other)
 	SDL_Event event;
 	bool quitEvent = false;
-	while(SDL_PollEvent(&event))
+	while (SDL_PollEvent(&event))
 	{
 		ImGui_ImplSdlGL3_ProcessEvent(&event);
 
-		if(event.type == SDL_QUIT || (event.type == SDL_KEYUP && event.key.keysym.sym == SDLK_ESCAPE))
+		if (event.type == SDL_QUIT || (event.type == SDL_KEYUP && event.key.keysym.sym == SDLK_ESCAPE))
 		{
 			quitEvent = true;
 		}
-		else if(event.type == SDL_KEYUP && event.key.keysym.sym == SDLK_g)
+		else if (event.type == SDL_KEYUP && event.key.keysym.sym == SDLK_g)
 		{
 			showUI = !showUI;
 		}
-		else if(event.type == SDL_KEYUP && event.key.keysym.sym == SDLK_PRINTSCREEN)
+		else if (event.type == SDL_KEYUP && event.key.keysym.sym == SDLK_PRINTSCREEN)
 		{
 			labhelper::saveScreenshot();
 		}
-		if(event.type == SDL_MOUSEBUTTONDOWN && event.button.button == SDL_BUTTON_LEFT
-		   && (!showUI || !io.WantCaptureMouse))
+		if (event.type == SDL_MOUSEBUTTONDOWN && event.button.button == SDL_BUTTON_LEFT
+			&& (!showUI || !io.WantCaptureMouse))
 		{
 			g_isMouseDragging = true;
 			int x;
@@ -487,12 +508,12 @@ bool handleEvents(void)
 			g_prevMouseCoords.y = y;
 		}
 
-		if(!(SDL_GetMouseState(NULL, NULL) & SDL_BUTTON(SDL_BUTTON_LEFT)))
+		if (!(SDL_GetMouseState(NULL, NULL) & SDL_BUTTON(SDL_BUTTON_LEFT)))
 		{
 			g_isMouseDragging = false;
 		}
 
-		if(event.type == SDL_MOUSEMOTION && g_isMouseDragging && !io.WantCaptureMouse)
+		if (event.type == SDL_MOUSEMOTION && g_isMouseDragging && !io.WantCaptureMouse)
 		{
 			// More info at https://wiki.libsdl.org/SDL_MouseMotionEvent
 			int delta_x = event.motion.x - g_prevMouseCoords.x;
@@ -500,7 +521,7 @@ bool handleEvents(void)
 			float rotationSpeed = 0.4f;
 			mat4 yaw = rotate(rotationSpeed * deltaTime * -delta_x, worldUp);
 			mat4 pitch = rotate(rotationSpeed * deltaTime * -delta_y,
-			                    normalize(cross(cameraDirection, worldUp)));
+				normalize(cross(cameraDirection, worldUp)));
 			cameraDirection = vec3(pitch * yaw * vec4(cameraDirection, 0.0f));
 			g_prevMouseCoords.x = event.motion.x;
 			g_prevMouseCoords.y = event.motion.y;
@@ -511,11 +532,11 @@ bool handleEvents(void)
 	const uint8_t* state = SDL_GetKeyboardState(nullptr);
 
 	static bool was_shift_pressed = state[SDL_SCANCODE_LSHIFT];
-	if(was_shift_pressed && !state[SDL_SCANCODE_LSHIFT])
+	if (was_shift_pressed && !state[SDL_SCANCODE_LSHIFT])
 	{
 		cameraSpeed /= 5;
 	}
-	if(!was_shift_pressed && state[SDL_SCANCODE_LSHIFT])
+	if (!was_shift_pressed && state[SDL_SCANCODE_LSHIFT])
 	{
 		cameraSpeed *= 5;
 	}
@@ -524,27 +545,27 @@ bool handleEvents(void)
 
 	vec3 cameraRight = cross(cameraDirection, worldUp);
 
-	if(state[SDL_SCANCODE_W])
+	if (state[SDL_SCANCODE_W])
 	{
 		cameraPosition += cameraSpeed * deltaTime * cameraDirection;
 	}
-	if(state[SDL_SCANCODE_S])
+	if (state[SDL_SCANCODE_S])
 	{
 		cameraPosition -= cameraSpeed * deltaTime * cameraDirection;
 	}
-	if(state[SDL_SCANCODE_A])
+	if (state[SDL_SCANCODE_A])
 	{
 		cameraPosition -= cameraSpeed * deltaTime * cameraRight;
 	}
-	if(state[SDL_SCANCODE_D])
+	if (state[SDL_SCANCODE_D])
 	{
 		cameraPosition += cameraSpeed * deltaTime * cameraRight;
 	}
-	if(state[SDL_SCANCODE_Q])
+	if (state[SDL_SCANCODE_Q])
 	{
 		cameraPosition -= cameraSpeed * deltaTime * worldUp;
 	}
-	if(state[SDL_SCANCODE_E])
+	if (state[SDL_SCANCODE_E])
 	{
 		cameraPosition += cameraSpeed * deltaTime * worldUp;
 	}
@@ -577,7 +598,10 @@ void gui()
 	ImGui::SliderFloat("Light Zenith", &lightZenith, 0.0f, 90.0f);
 	ImGui::Text("Application average %.3f ms/frame (%.1f FPS)", 1000.0f / ImGui::GetIO().Framerate,
 		ImGui::GetIO().Framerate);
-	// ----------------------------------------------------------
+	if (ImGui::Button("Reload Shaders")) {
+		loadShaders(true); 
+	}
+	ImGui::Checkbox("Use SSAO", &useSSAO);
 }
 
 int main(int argc, char* argv[])
@@ -589,7 +613,7 @@ int main(int argc, char* argv[])
 	bool stopRendering = false;
 	auto startTime = std::chrono::system_clock::now();
 
-	while(!stopRendering)
+	while (!stopRendering)
 	{
 		//update currentTime
 		std::chrono::duration<float> timeSinceStart = std::chrono::system_clock::now() - startTime;
@@ -607,7 +631,7 @@ int main(int argc, char* argv[])
 		display();
 
 		// Render overlay GUI.
-		if(showUI)
+		if (showUI)
 		{
 			gui();
 		}

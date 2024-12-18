@@ -18,11 +18,12 @@ uniform mat4 projectionMatrix;
 layout(location = 0) out vec4 fragColor;
 
 uniform vec3 samples[64];
+uniform sampler2D noiseTexture;
 
 int kernelSize = 64;
 float radius = 0.1;
 float bias = 0.025;
-const vec2 noiseScale = vec2(800.0/4.0, 600.0/4.0); 
+
 vec3 samplePos; float rangeCheck;
 
 vec3 homogenize(vec4 v) { return vec3((1.0 / v.w) * v); }
@@ -57,11 +58,14 @@ void main() {
 	vec3 vs_bitangent = cross(vs_normal, vs_tangent);
 	mat3 tbn = mat3(vs_tangent, vs_bitangent, vs_normal); // local base
 
+	vec2 noiseCoord = gl_FragCoord.xy / vec2(textureSize(noiseTexture, 0)); // 计算噪声坐标
+    vec3 noiseValue = texture(noiseTexture, noiseCoord).xyz; // 从噪声纹理中采样
+
 	int num_visible_samples = 0; 
 	int num_valid_samples = 0; 
 	for (int i = 0; i < kernelSize; i++) {
 		// Project hemishere sample onto the local base
-		vec3 s = tbn * samples[i];
+		 vec3 s = tbn * (samples[i] + noiseValue * 0.1);
 
 		// compute view-space position of sample
 		vec3 vs_sample_position = vs_pos + s * radius ;
@@ -95,8 +99,12 @@ void main() {
 		hemisphericalVisibility = 1.0;
 
 	fragColor = vec4(vec3(hemisphericalVisibility), 1.0);
-	// fragColor = vec4(fragmentDepth); // debug depth
-	 //fragColor = vec4(vs_normal, 1.0); // debug normals
+	//fragColor = vec4(fragmentDepth); // debug depth
+	//fragColor = vec4(vs_normal, 1.0); // debug normals
+
+	// fragColor = vec4(vec3(float(num_valid_samples) / float(kernelSize)), 1.0); // 检查有效样本比例
+	// fragColor = vec4(vec3(float(num_visible_samples) / float(kernelSize)), 1.0); // 检查可见样本比例
+
 
 	return;
 }
